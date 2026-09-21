@@ -27,7 +27,13 @@ site=ROOT/'app/src/main/assets/site'
 p=Inspector();p.feed((site/'index.html').read_text())
 assert len(p.ids)==len(set(p.ids)), 'Duplicated HTML IDs'
 seed=json.loads(p.data['app-data'])
-assert not seed['clients'] and not seed['days'], 'Do not upload private customer data'
+assert len(seed['clients'])==335, 'Expected the 335 embedded client records'
+assert len(seed['days'])==20, 'Expected the 20 embedded journeys'
+ids=[str(c['id']) for c in seed['clients']]
+assert len(ids)==len(set(ids)), 'Duplicated client IDs in embedded base'
+assert seed.get('hoursChecked')==335, 'All client records must have a public-hours search status'
+assert seed.get('hoursKnown')==248 and seed.get('hoursUnknown')==86 and seed.get('temporarilyClosed')==1, 'Unexpected hours audit counts'
+assert all(c.get('hoursSearchPerformed') is True for c in seed['clients']), 'Every client must record that the hours search was performed'
 assert json.loads(p.data['saved-state']) is None, 'Do not upload private snapshots'
 assert p.sources==['app.js']
 for src in p.sources: assert (site/src).is_file()
@@ -44,4 +50,4 @@ for f in ROOT.rglob('*'):
     if not f.is_file() or '.git' in f.parts or 'build' in f.parts or '.gradle' in f.parts: continue
     assert f.suffix not in {'.p12','.jks','.keystore','.pfx'}, 'Private signing key in project'
     assert f.name not in {'CLIENTES_MDS.json','MDS_Firma_Privada.txt'}, 'Private file in project'
-print('OK: Android structure, XML, 3 local assets, no embedded clients, no signing keys, safe permissions.')
+print('OK: Android structure, XML, 335 embedded clients, 20 journeys, hours audit, no signing keys, safe permissions.')

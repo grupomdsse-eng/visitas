@@ -1,0 +1,21 @@
+MDS VISITAS v1.0.3 — ARCHIVOS A SUSTITUIR EN GITHUB
+
+OBLIGATORIOS (sustituir manteniendo exactamente estas rutas):
+1. app/src/main/assets/site/app.js
+2. app/src/main/assets/site/app.css
+3. app/src/main/assets/site/index.html
+4. scripts/preflight.py
+5. version.properties
+
+RECOMENDADOS / DOCUMENTACIÓN:
+6. auditoria/horarios_clientes.csv
+7. auditoria/jornadas_ordenadas.csv
+8. HORARIOS_Y_RUTAS.md
+9. README.md
+10. PRIVACIDAD.md
+
+No cambies el secreto MDS_ANDROID_SIGNING.
+No necesitas modificar android-apk.yml, build.gradle, AndroidManifest.xml, MainActivity.java ni styles.xml si ya tienes instalada la v1.0.2 corregida.
+
+Después de subir los archivos:
+GitHub > Actions > Generar APK Android > Run workflow.

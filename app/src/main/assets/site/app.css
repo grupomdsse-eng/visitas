@@ -73,3 +73,13 @@ body{overscroll-behavior-y:none}button,a{touch-action:manipulation}button{min-he
 /* Android handles the system/keyboard insets natively. */
 #installApp,#exportPortable,#updateBanner{display:none!important}
 #cacheStatus{font-weight:600}
+
+/* Horarios públicos y estado de apertura */
+.hours-badge,.hours-confidence{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;margin:0 6px 8px 0;font-size:11px;font-weight:750;line-height:1.35}
+.hours-badge.open{background:#e7f6ec;color:#17673f}.hours-badge.closed{background:#fff0ed;color:#963b29}.hours-badge.unknown{background:#fff5dd;color:#7d5918}
+.hours-confidence.high{background:#eaf2fb;color:var(--blue)}.hours-confidence.medium{background:#fff5dd;color:#7d5918}.hours-confidence.low,.hours-confidence.unknown{background:#f2f4f6;color:#586a7a}
+.weekly-hours{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin:12px 0}.weekly-hours>div{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #edf1f5;padding:7px 0;font-size:12px}.weekly-hours span{color:var(--muted)}.weekly-hours b{text-align:right;font-size:12px}
+.hours-warning{background:#fff6e1;border:1px solid #f0d7a6;border-radius:10px;padding:12px 14px;margin:10px 0}.hours-warning b,.hours-warning span{display:block}.hours-warning span{font-size:12px;color:#73531e;margin-top:3px}
+.compact-hours{display:block;font-size:11px;font-weight:700;margin-top:5px}.compact-hours.open{color:#196643}.compact-hours.closed{color:#9b3e2a}.compact-hours.unknown{color:#856020}
+.hours-section{background:#fbfcfe;border:1px solid #e8eef4;border-radius:11px;padding:15px;margin-top:15px}
+@media(max-width:760px){.weekly-hours{grid-template-columns:1fr}.hours-badge,.hours-confidence{font-size:10px}.compact-hours{font-size:11px}}

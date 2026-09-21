@@ -2,6 +2,7 @@ const IS_ANDROID = typeof window.MDSNative !== 'undefined';
 let nativeSaveOK=false;
 'use strict';
 let SEED=JSON.parse(document.getElementById('app-data').textContent);
+const EMBEDDED_SEED=JSON.parse(JSON.stringify(SEED));
 const SNAP=JSON.parse(document.getElementById('saved-state').textContent||'null');
 const STORE='mds-visitas-v3';
 let state={version:3,updated:0,overrides:{},progress:{},notes:{},geo:{},geocodeFailures:{},days:SEED.days,day:0,tab:'route',stale:false,visitMinutes:20,parkingMinutes:5,dayMinutes:480};
@@ -24,11 +25,67 @@ function mapsUrl(origin,destination,waypoints=[],navigate=false){const p=new URL
 function google(c){return 'https://www.google.com/search?q='+encodeURIComponent(c.title+' '+c.town+' '+c.address);}
 function mapsSearch(c){return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(c.title+', '+c.full);}
 function phone(c){return ((c.mobile||'')+' '+(c.phone||'')).replace(/\s|\(|\)|\.|-/g,'').match(/(?:\+34)?[6789]\d{8}/)?.[0]||'';}
-function routeClients(d){return (d?.ids||[]).map(customer).filter(c=>c&&c.active&&c.id!=='729');}
-function sourceLinks(c){return [...new Set([c.change?.source,...(c.urls||[])].filter(Boolean))].slice(0,4).filter(x=>/^https?:\/\//.test(x)).map((u,i)=>`<a href="${E(u)}" target="_blank" rel="noopener noreferrer">Fuente ${i+1} ↗</a>`).join(' · ');}
+function routeClients(d){return (d?.ids||[]).map(customer).filter(c=>c&&c.active&&!c.autoRouteExcluded&&c.id!=='729');}
+function sourceLinks(c){const links=[...new Set([c.change?.source,...(c.urls||[])].filter(Boolean))].slice(0,4).filter(x=>/^https?:\/\//.test(x)).map((u,i)=>`<a href="${E(u)}" target="_blank" rel="noopener noreferrer">Fuente ${i+1} ↗</a>`);links.push(`<a href="${E(googleHours(c))}" target="_blank" rel="noopener noreferrer">Comprobar horario en Google ↗</a>`);return links.join(' · ');}
 function badge(c){if(c.manualConfirmed)return '<span class="badge good">Confirmado por ti</span>';if(c.change)return '<span class="badge blue">Dirección actualizada</span>';if(c.status==='Dirección comercial corroborada'||c.status==='Corroborada con ajuste menor')return '<span class="badge good">Publicado por el negocio</span>';if(!c.active)return '<span class="badge amber">Por confirmar / apartado</span>';return '<span class="badge amber">Confirmar visita</span>';}
 function km(v){return Number.isFinite(v)?new Intl.NumberFormat('es-ES',{maximumFractionDigits:1}).format(v)+' km':'Sin calcular';}
 function time(v){if(!Number.isFinite(v))return 'Sin calcular';let x=Math.ceil(v);return `${Math.floor(x/60)?Math.floor(x/60)+' h ':''}${x%60} min`;}
+
+const DAY_KEYS=['sun','mon','tue','wed','thu','fri','sat'];
+const DAY_NAMES={sun:'Domingo',mon:'Lunes',tue:'Martes',wed:'Miércoles',thu:'Jueves',fri:'Viernes',sat:'Sábado'};
+const WORKDAYS=['mon','tue','wed','thu','fri'];
+function hmMinutes(v){const m=String(v||'').match(/^(\d{1,2}):(\d{2})$/);return m?Number(m[1])*60+Number(m[2]):null;}
+function minText(v){if(!Number.isFinite(v))return '—';const m=Math.max(0,Math.round(v));return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');}
+function hoursInfo(c){return c?.businessHours||{hours:{},confidence:'unknown',source:'public-search',sourceName:'',note:'Horario no verificado.'};}
+function hasPublicHours(c){const h=hoursInfo(c).hours||{};return Object.values(h).some(v=>Array.isArray(v)&&v.length);}
+function isTempClosed(c){return hoursInfo(c).businessStatus==='temporarily_closed';}
+function hoursConfidenceText(c){const x=hoursInfo(c).confidence;return x==='high'?'Horario contrastado':x==='medium'?'Horario asociado · revisar':x==='low'?'Horario orientativo · confirmar':'Horario no verificado';}
+function dayHours(c,key){
+ const h=hoursInfo(c).hours||{},windows=Array.isArray(h[key])?h[key]:null;
+ if(isTempClosed(c))return 'Cerrado temporalmente';
+ if(!windows)return 'Horario no verificado';
+ if(!windows.length)return 'Cerrado';
+ return windows.map(w=>w.join('–')).join(' · ');
+}
+function weeklyHoursHTML(c){
+ const h=hoursInfo(c),keys=['mon','tue','wed','thu','fri','sat','sun'];
+ if(isTempClosed(c))return '<div class="hours-warning"><b>Cerrado temporalmente</b><span>'+E(h.note||'Confirmar antes de visitar.')+'</span></div>';
+ if(!hasPublicHours(c))return '<div class="hours-warning"><b>Horario no verificado</b><span>Se buscó información pública para esta ficha, pero no se encontró un horario inequívoco. Confirma antes de desplazarte.</span></div>';
+ return '<div class="weekly-hours">'+keys.map(k=>`<div><span>${E(DAY_NAMES[k])}</span><b>${E(dayHours(c,k))}</b></div>`).join('')+'</div>';
+}
+function currentOpenState(c,at=new Date()){
+ if(isTempClosed(c))return {class:'closed',label:'Cerrado temporalmente'};
+ const h=hoursInfo(c).hours||{},key=DAY_KEYS[at.getDay()],windows=Array.isArray(h[key])?h[key]:null;
+ if(!windows)return {class:'unknown',label:'Horario no verificado'};
+ if(!windows.length)return {class:'closed',label:'Cerrado hoy'};
+ const minute=at.getHours()*60+at.getMinutes();
+ for(const [a,b] of windows){const s=hmMinutes(a),e=hmMinutes(b);if(s!==null&&e!==null&&minute>=s&&minute<e)return {class:'open',label:'Abierto ahora · hasta '+b};}
+ const future=windows.map(w=>[hmMinutes(w[0]),w[0]]).filter(x=>x[0]!==null&&x[0]>minute).sort((a,b)=>a[0]-b[0])[0];
+ return future?{class:'closed',label:'Cerrado ahora · abre '+future[1]}:{class:'closed',label:'Cerrado ahora'};
+}
+function plannedStop(d,id){return (d?.stops||[]).find(s=>String(s.id)===String(id));}
+function routeAvailability(c,weekday,eta,visitMinutes){
+ if(isTempClosed(c))return {possible:false,reason:'Cerrado temporalmente',known:true};
+ const h=hoursInfo(c).hours||{},windows=Array.isArray(h[weekday])?h[weekday]:null;
+ if(windows){
+   if(!windows.length)return {possible:false,reason:'Cerrado '+DAY_NAMES[weekday].toLowerCase(),known:true};
+   for(const [a,b] of windows){const s=hmMinutes(a),e=hmMinutes(b);if(s===null||e===null)continue;const arrival=Math.max(eta,s);if(arrival+visitMinutes<=e)return {possible:true,arrival,wait:Math.max(0,arrival-eta),known:true,closes:e,label:(arrival>eta?'Esperar hasta '+a:'Abierto')+' · cierra '+b};}
+   return {possible:false,reason:'Fuera de horario',known:true};
+ }
+ // Sin horario público: nunca se presenta como abierto. Se usa una franja prudente
+ // para que no bloquee la planificación, pero la ficha queda marcada para confirmar.
+ const safeStart=10*60,safeEnd=13*60;const arrival=Math.max(eta,safeStart);
+ if(arrival+visitMinutes<=safeEnd)return {possible:true,arrival,wait:Math.max(0,arrival-eta),known:false,closes:safeEnd,label:'Horario no verificado · confirmar antes'};
+ return {possible:false,reason:'Horario no verificado fuera de franja prudente',known:false};
+}
+function workdayForIndex(i,startKey='mon'){let idx=Math.max(0,WORKDAYS.indexOf(startKey));return WORKDAYS[(idx+i)%WORKDAYS.length];}
+function nextBusinessDayKey(){const d=new Date().getDay();return d>=1&&d<=5?DAY_KEYS[d]:'mon';}
+function googleHours(c){return 'https://www.google.com/search?q='+encodeURIComponent((c.commercialName||c.title||c.name)+' '+c.town+' horario');}
+function hoursBadge(c){
+ const live=currentOpenState(c),conf=hoursInfo(c).confidence||'unknown';
+ return `<span class="hours-badge ${E(live.class)}">${E(live.label)}</span><span class="hours-confidence ${E(conf)}">${E(hoursConfidenceText(c))}</span>`;
+}
+
 function toast(t,undo=null){$('toastText').textContent=t;$('undo').hidden=!undo;undoAction=undo;$('toast').hidden=false;clearTimeout(window.toastTimer);window.toastTimer=setTimeout(()=>$('toast').hidden=true,7000);}
 function modalClose(id){$(id).close();}
 function setTab(tab){state.tab=tab;save();render();window.scrollTo({top:0,behavior:'smooth'});}
@@ -50,10 +107,10 @@ function contactValue(value,kind){
  return result+E(text.slice(at));
 }
 function clientSheetFull(c,i,cs,d,nextId){
- const st=state.progress[c.id]?.status,progress=state.progress[c.id],same=i>0&&keyOf(c)===keyOf(cs[i-1]),leg=d.legs?.[i],point=loc(c);
+ const st=state.progress[c.id]?.status,progress=state.progress[c.id],same=i>0&&keyOf(c)===keyOf(cs[i-1]),leg=d.legs?.[i],point=loc(c),stop=plannedStop(d,c.id);
  const status=st==='done'?'Visita realizada':st==='skip'?'Pospuesta · sigue pendiente':c.id===nextId?'Siguiente visita':'Pendiente';
  const statusClass=st==='done'?'done':st==='skip'?'skip':c.id===nextId?'next':'';
- const legText=same?'Misma dirección que la visita anterior':d.mode==='road'&&!state.stale&&leg?`${km(leg.km)} desde ${i?'la visita anterior':'la sede'} · ${time(leg.minutes)}`:'Recorrido pendiente de cálculo por carretera';
+ const roadMode=String(d.mode||'').startsWith('road');const legText=same?'Misma dirección que la visita anterior':roadMode&&!state.stale&&leg?`${km(leg.km)} desde ${i?'la visita anterior':'la sede'} · ${time(leg.minutes)}${stop?.plannedArrival?' · llegada prevista '+stop.plannedArrival:''}`:stop?.plannedArrival?`Llegada prevista ${stop.plannedArrival} · ordenado por horario y cercanía aproximada`:'Recorrido pendiente de cálculo por carretera';
  const commercial=commercialName(c),raw=c.commercialRaw;
  const fields=[
  infoField('Nombre comercial',commercial,{wide:true}),
@@ -69,7 +126,10 @@ function clientSheetFull(c,i,cs,d,nextId){
  infoField('Fax',contactValue(c.fax,'phone'),{html:true}),
  infoField('Agente · código original',c.agent),
  infoField('Tipo de cliente · código original',c.clientType),
- infoField('Incluido en la planificación',c.active?'Sí':'No'),
+ infoField('Incluido en la planificación',c.active&&!c.autoRouteExcluded?'Sí':'No'),
+ infoField('Horario público · '+DAY_NAMES[stop?.weekday||d.weekday||DAY_KEYS[new Date().getDay()]],dayHours(c,stop?.weekday||d.weekday||DAY_KEYS[new Date().getDay()]),{wide:true}),
+ infoField('Confianza del horario',hoursConfidenceText(c)),
+ infoField('Horario revisado',hoursInfo(c).checked||'No verificado'),
  present(raw)&&norm(raw)!==norm(commercial)?infoField('Campo comercial original / referencia',raw,{wide:true}):'',
  present(c.originalMarker)?infoField('Marca original del fichero (sin interpretar)',c.originalMarker):''
  ].join('');
@@ -91,6 +151,7 @@ function clientSheetFull(c,i,cs,d,nextId){
  return `<article class="visit client-sheet ${st==='done'?'completed':''} ${c.id===nextId?'current':''}" id="client-${E(c.id)}" aria-labelledby="client-title-${E(c.id)}">
   <header class="sheet-head"><span class="stopnum" aria-label="Visita ${i+1}">${st==='done'?'✓':String(i+1).padStart(2,'0')}</span><div class="sheet-heading"><div class="sheet-eyebrow">${commercial?'Nombre comercial':'Cliente · sin nombre comercial informado'}</div><h4 class="sheet-title" id="client-title-${E(c.id)}">${E(shownName(c))}</h4><div class="sheet-meta"><span class="sheet-status ${statusClass}">${E(status)}</span>${badge(c)}</div></div></header>
   <dl class="sheet-grid">${fields}</dl>
+  <section class="sheet-section hours-section"><h4>Horario del negocio</h4>${hoursBadge(c)}${weeklyHoursHTML(c)}<p class="sheet-evidence">${E(hoursInfo(c).sourceName?`Fuente asociada: ${hoursInfo(c).sourceName}. `:'')}${E(hoursInfo(c).note||'')} <a href="${E(googleHours(c))}" target="_blank" rel="noopener noreferrer">Comprobar horario en Google ↗</a></p></section>
   <section class="sheet-section"><h4>Notas del cliente / visita</h4><div class="sheet-note">${notes}</div>${recorded}${before}</section>
   <section class="sheet-section sheet-audit"><h4>Dirección y comprobaciones disponibles</h4><dl class="sheet-grid">${auditFields}</dl>${[...new Set(evidence)].map(t=>`<p class="sheet-evidence">${E(t)}</p>`).join('')}${sources?`<p class="sheet-sources">Fuentes de la ficha: ${sources}</p>`:''}</section>
   <p class="sheet-leg">${E(legText)}</p>
@@ -102,29 +163,30 @@ function renderBase(){
  for(const id of ['route','clients','tools'])$(id+'View').hidden=state.tab!==id;
  document.querySelectorAll('[data-tab]').forEach(b=>{b.classList.toggle('selected',b.dataset.tab===state.tab);b.setAttribute('aria-current',b.dataset.tab===state.tab?'page':'false');});
  state.day=Math.max(0,Math.min(state.day,Math.max(0,state.days.length-1)));
- const all=customers();$('headerSummary').textContent=`${all.filter(c=>c.active).length} fichas en planificación · ${all.filter(c=>!c.active).length} apartadas`;
- $('daySelect').innerHTML=state.days.map((d,i)=>`<option value="${i}"${state.day===i?' selected':''}>Jornada ${i+1} · ${routeClients(d).length} clientes${d.mode==='road'?'':' · borrador'}</option>`).join('');
+ const all=customers();$('headerSummary').textContent=`${all.length} clientes · ${all.filter(c=>c.active&&!c.autoRouteExcluded).length} en rutas · ${all.filter(c=>!c.active||c.autoRouteExcluded).length} fuera de ruta`;
+ $('daySelect').innerHTML=state.days.map((d,i)=>`<option value="${i}"${state.day===i?' selected':''}>Jornada ${i+1}${d.weekdayName?' · '+d.weekdayName:''} · ${routeClients(d).length} clientes${String(d.mode||'').startsWith('road')?' · carretera':' · horario+cercanía'}</option>`).join('');
  $('prevDay').disabled=state.day<=0;$('nextDay').disabled=state.day>=state.days.length-1;
  const d=state.days[state.day]||{ids:[],mode:'provisional'};const cs=routeClients(d);let pending=cs.filter(c=>!processed(c.id));let n=cs.filter(c=>done(c.id)).length;let skips=cs.filter(c=>state.progress[c.id]?.status==='skip').length;
- $('dayTitle').textContent='Jornada '+(state.day+1);$('zone').textContent=[...new Set(cs.map(c=>c.town))].join(' → ')||'Sin clientes programados';
- $('kpiDone').textContent=`${n} / ${cs.length}`;$('kpiPending').textContent=pending.length;$('kpiRoad').textContent=d.mode==='road'&&!state.stale?km(d.km):'—';
+ $('dayTitle').textContent='Jornada '+(state.day+1)+(d.weekdayName?' · '+d.weekdayName:'');$('zone').textContent=[...new Set(cs.map(c=>c.town))].join(' → ')||'Sin clientes programados';
+ $('kpiDone').textContent=`${n} / ${cs.length}`;$('kpiPending').textContent=pending.length;$('kpiRoad').textContent=String(d.mode||'').startsWith('road')&&!state.stale?km(d.km):'Horario ✓';
  $('progressBar').style.width=(cs.length?(n+skips)/cs.length*100:0)+'%';
- $('runWarning').hidden=d.mode==='road'&&!state.stale;
- $('modeLabel').textContent=state.stale?'La dirección o selección ha cambiado. Recalcula las rutas.':d.mode==='road'?'Carretera · sin tráfico en directo':'Borrador por zonas · no optimizado por carretera';
- $('roadSummary').hidden=d.mode!=='road'||state.stale;
- const total=d.minutes+cs.length*(state.visitMinutes+state.parkingMinutes);
- $('roadSummary').innerHTML=d.mode==='road'?`Conducción estimada: <b>${time(d.minutes)}</b> · Con visitas y aparcamiento: <b>${time(total)}</b>${total>state.dayMinutes?'<div class="alert">Esta jornada supera la duración orientativa disponible. Mantiene los 15 clientes solicitados; conviene repartirla o concertar visitas más cortas.</div>':''}`:'';
+ $('runWarning').hidden=String(d.mode||'').startsWith('road')&&!state.stale;
+ $('modeLabel').textContent=state.stale?'La dirección o selección ha cambiado. Recalcula las rutas.':String(d.mode||'').startsWith('road')?'Carretera + horarios · sin tráfico en directo':'Horarios + cercanía aproximada · pendiente de distancia exacta por carretera';
+ $('roadSummary').hidden=!String(d.mode||'').startsWith('road')||state.stale;
+ const total=(Number(d.minutes)||0)+cs.length*(state.visitMinutes+state.parkingMinutes);
+ $('roadSummary').innerHTML=String(d.mode||'').startsWith('road')?`Conducción estimada: <b>${time(d.minutes)}</b> · Con visitas y aparcamiento: <b>${time(total)}</b> · orden ajustado a los horarios públicos${total>state.dayMinutes?'<div class="alert">Esta jornada supera la duración orientativa disponible. Se prioriza no llegar con el negocio cerrado.</div>':''}`:'';
  const c=pending[0];$('nextCard').hidden=!c;$('finishedCard').hidden=!!c;
- if(c){const pos=cs.findIndex(x=>x.id===c.id)+1;$('nextNumber').textContent=String(pos).padStart(2,'0');$('nextName').textContent=shownName(c);$('nextAddress').textContent=c.full;$('nextBadge').innerHTML=badge(c);$('nextMeta').textContent='Código '+c.id+(c.contact?' · '+c.contact:'');$('navigate').href=mapsUrl(null,target(c),[],true);$('navigate').onclick=()=>{if(!loc(c)){if(!confirm('Esta ubicación no está geocodificada. Google Maps buscará la dirección escrita. Revisa el destino antes de iniciar la navegación.'))return false;}};$('doneNext').dataset.id=c.id;$('skipNext').dataset.id=c.id;$('editNext').dataset.id=c.id;const tel=phone(c);$('callNext').hidden=!tel;$('callNext').href='tel:'+tel;}
+ if(c){const pos=cs.findIndex(x=>x.id===c.id)+1,stop=plannedStop(d,c.id),dayKey=stop?.weekday||d.weekday||DAY_KEYS[new Date().getDay()];$('nextNumber').textContent=String(pos).padStart(2,'0');$('nextName').textContent=shownName(c);$('nextAddress').textContent=c.full;$('nextBadge').innerHTML=badge(c)+' '+hoursBadge(c);$('nextMeta').textContent='Código '+c.id+(c.contact?' · '+c.contact:'')+' · '+dayHours(c,dayKey)+(stop?.plannedArrival?' · llegada prevista '+stop.plannedArrival:'');$('navigate').href=mapsUrl(null,target(c),[],true);$('navigate').onclick=()=>{if(!loc(c)){if(!confirm('Esta ubicación no está geocodificada. Google Maps buscará la dirección escrita. Revisa el destino antes de iniciar la navegación.'))return false;}};$('doneNext').dataset.id=c.id;$('skipNext').dataset.id=c.id;$('editNext').dataset.id=c.id;const tel=phone(c);$('callNext').hidden=!tel;$('callNext').href='tel:'+tel;}
  $('completeText').textContent=skips?`${n} visitas realizadas y ${skips} pospuestas. Puedes recuperarlas desde la lista.`:'Todas las visitas de esta jornada están registradas.';
  $('backToBase').href=mapsUrl(null,target(SEED.origin),[],true);
  $('segmentLinks').innerHTML=segments(d).map(s=>`<a class="segment" href="${E(s.url)}" target="_blank" rel="noopener noreferrer"><b>${E(s.label)} ↗</b><small>${E(s.detail||'Abrir en Google Maps')}</small></a>`).join('');
  $('visitList').innerHTML=cs.map((item,i)=>clientSheet(item,i,cs,d,c?.id)).join('')||'<p class="empty">No hay clientes programados para esta jornada.</p>';
- $('locationCount').textContent=`${cs.length} fichas · ${new Set(cs.map(keyOf)).size} direcciones textuales. Las razones sociales con la misma dirección aparecen juntas cuando el cálculo lo permite.`;
+ $('locationCount').textContent=`${cs.length} fichas · ${new Set(cs.map(keyOf)).size} direcciones textuales · ${cs.filter(hasPublicHours).length} con horario público en esta jornada. Las fichas sin horario están marcadas para confirmar.`;
  $('clientFilter').value=filterValue;renderClients();$('visitMinutes').value=state.visitMinutes;$('parkingMinutes').value=state.parkingMinutes;$('dayMinutes').value=state.dayMinutes;
- $('changesCount').textContent=SEED.changed;$('allCount').textContent=all.length;$('heldCount').textContent=all.filter(c=>!c.active).length;
+ $('changesCount').textContent=SEED.changed;$('allCount').textContent=all.length;$('heldCount').textContent=all.filter(c=>!c.active||c.autoRouteExcluded).length;
+ if($('hoursKnownCount'))$('hoursKnownCount').textContent=all.filter(hasPublicHours).length;if($('hoursUnknownCount'))$('hoursUnknownCount').textContent=all.filter(c=>!hasPublicHours(c)&&!isTempClosed(c)).length;
  $('calcCount').textContent=all.filter(c=>loc(c)).length;
- const assigned=new Set(state.days.flatMap(x=>x.ids));const unassigned=all.filter(c=>c.active&&!assigned.has(c.id));
+ const assigned=new Set(state.days.flatMap(x=>x.ids));const unassigned=all.filter(c=>c.active&&!c.autoRouteExcluded&&!assigned.has(c.id));
  $('excludedNotice').hidden=!unassigned.length;$('excludedNotice').textContent=unassigned.length?'Hay '+unassigned.length+' fichas activas sin jornada: falta confirmar su ubicación o recalcular. Siguen conservadas en Clientes.':'';
  showStorage();
 }
@@ -162,19 +224,58 @@ let nextRequest=0;
 async function fetchJSON(url){if(abortRun)throw Error('Cálculo detenido.');const delay=Math.max(0,nextRequest-Date.now());if(delay)await new Promise(r=>setTimeout(r,delay));if(abortRun)throw Error('Cálculo detenido.');nextRequest=Date.now()+1100;const ctrl=new AbortController();const timer=setTimeout(()=>ctrl.abort(),18000);try{const response=await fetch(url,{signal:ctrl.signal,credentials:'omit',cache:'no-store'});if(!response.ok)throw Error('Servicio externo: HTTP '+response.status);return await response.json();}catch(e){if(e.name==='AbortError')throw Error('El servicio de mapas ha tardado demasiado en responder. Vuelve a intentarlo más tarde.');if(e instanceof TypeError)throw Error('No se pudo conectar con el servicio de mapas. Comprueba Internet; también puede estar limitado por el servicio o el navegador.');throw e;}finally{clearTimeout(timer);}}
 async function geocode(c){const key=keyOf(c);if(loc(c))return loc(c);if(state.geocodeFailures[key])return null;const p=splitAddress(c);if(!p.number){state.geocodeFailures[key]='Dirección sin portal inequívoco. Abre la ficha, confirma el acceso y pega sus coordenadas.';return null;}let results=await fetchJSON('https://www.cartociudad.es/geocoder/api/geocoder/candidates?'+new URLSearchParams({q:p.query,limit:'10'}));if(!Array.isArray(results))throw Error('Respuesta de geocodificación no reconocida.');let matches=results.filter(x=>addressMatch(c,x));let unique=[...new Map(matches.map(x=>[[Number(x.lat).toFixed(6),Number(x.lng).toFixed(6)].join(','),x])).values()];if(unique.length===1){const x=unique[0];const out={point:[+x.lat,+x.lng],label:x.address+' · '+x.portalNumber+' · '+x.muni,source:'CartoCiudad / IGN',date:new Date().toISOString()};state.geo[key]=out;return out;}state.geocodeFailures[key]=unique.length>1?'Varios portales posibles: confirma las coordenadas en la ficha.':'No se ha encontrado coincidencia inequívoca de calle, número y municipio. No se usa el centro del código postal.';return null;}
 function report(text,percent){$('busyTitle').textContent=text;$('calcProgress').value=Math.max(0,Math.min(100,percent));$('busyPercent').textContent=Math.round(percent)+' %';}
-function greedyDays(ids,locationIndex,D,T,limit=15){const remaining=new Set(ids);const result=[];while(remaining.size){let cursor=0,route=[],legs=[],meters=0,seconds=0;for(let k=0;k<limit&&remaining.size;k++){let best=null,bd=Infinity,bt=Infinity;for(const id of remaining){const idx=locationIndex[id];const dist=D[cursor]?.[idx],dur=T[cursor]?.[idx];if(dist===null||dur===null||!Number.isFinite(dist)||!Number.isFinite(dur))continue;if(dist<bd-0.01||(Math.abs(dist-bd)<0.01&&(dur<bt||(dur===bt&&Number(id)<Number(best))))){best=id;bd=dist;bt=dur;}}if(best===null)break;remaining.delete(best);route.push(best);legs.push({km:bd/1000,minutes:bt/60});meters+=bd;seconds+=bt;cursor=locationIndex[best];}if(!route.length)break;let backD=D[cursor][0],backT=T[cursor][0];if(!Number.isFinite(backD)||!Number.isFinite(backT))throw Error('No se pudo calcular el regreso a la sede.');result.push({ids:route,mode:'road',km:(meters+backD)/1000,minutes:(seconds+backT)/60,legs,returnKm:backD/1000,returnMinutes:backT/60,calculated:new Date().toISOString(),criterion:'Menor distancia entre las rutas rápidas de OSRM; selección secuencial, no óptimo global.'});}return {days:result,unreachable:[...remaining]};}
+function greedyDays(ids,locationIndex,D,T,limit=15){
+ const remaining=new Set(ids.map(String)),result=[],startKey=nextBusinessDayKey();let dayIndex=0,emptyDays=0;
+ while(remaining.size&&dayIndex<260){
+   const weekday=workdayForIndex(dayIndex,startKey),weekdayName=DAY_NAMES[weekday];
+   let cursor=0,route=[],legs=[],stops=[],meters=0,seconds=0,waitMinutes=0,current=7*60+30;
+   for(let k=0;k<limit&&remaining.size;k++){
+     let best=null,bestScore=Infinity,bestData=null;
+     for(const id of remaining){
+       const c=customer(id);if(!c||c.autoRouteExcluded||isTempClosed(c))continue;
+       const idx=locationIndex[id],dist=D[cursor]?.[idx],dur=T[cursor]?.[idx];
+       if(dist===null||dur===null||!Number.isFinite(dist)||!Number.isFinite(dur))continue;
+       const eta=current+dur/60,availability=routeAvailability(c,weekday,eta,state.visitMinutes);
+       if(!availability.possible)continue;
+       const slack=Number.isFinite(availability.closes)?availability.closes-(availability.arrival+state.visitMinutes):999;
+       const urgency=Math.max(0,120-slack);
+       const score=dist+availability.wait*450+(availability.known?0:5000)-urgency*15;
+       if(score<bestScore-0.01||(Math.abs(score-bestScore)<0.01&&(dur<(bestData?.dur??Infinity)||(dur===(bestData?.dur??Infinity)&&Number(id)<Number(best))))){
+         best=id;bestScore=score;bestData={idx,dist,dur,eta,availability,slack};
+       }
+     }
+     if(best===null)break;
+     const c=customer(best),a=bestData.availability;
+     remaining.delete(best);route.push(best);meters+=bestData.dist;seconds+=bestData.dur;waitMinutes+=a.wait||0;
+     legs.push({km:bestData.dist/1000,minutes:bestData.dur/60,waitMinutes:a.wait||0});
+     stops.push({id:best,order:route.length,plannedArrival:minText(a.arrival),distanceFromPreviousKm:bestData.dist/1000,openingStatusAtPlan:a.known?(a.wait?`Apertura ${minText(a.arrival)} · cierra ${minText(a.closes)}`:`Abierto · cierra ${minText(a.closes)}`):'Horario no verificado · confirmar antes',hoursConfidence:hoursInfo(c).confidence||'unknown',weekday});
+     current=a.arrival+state.visitMinutes+state.parkingMinutes;cursor=bestData.idx;
+   }
+   if(route.length){
+     const backD=D[cursor]?.[0],backT=T[cursor]?.[0];
+     if(!Number.isFinite(backD)||!Number.isFinite(backT))throw Error('No se pudo calcular el regreso a la sede.');
+     result.push({number:result.length+1,weekday,weekdayName,ids:route,stops,mode:'road-hours',km:(meters+backD)/1000,minutes:(seconds+backT)/60,waitMinutes,legs,returnKm:backD/1000,returnMinutes:backT/60,calculated:new Date().toISOString(),criterion:'Primero clientes visitables según horario público a la hora estimada; entre ellos, menor distancia por carretera desde la ubicación anterior. Las fichas sin horario se usan solo en una franja prudente y quedan marcadas para confirmar.'});
+     emptyDays=0;
+   }else{
+     emptyDays++;
+     if(emptyDays>=5)break;
+   }
+   dayIndex++;
+ }
+ return {days:result,unreachable:[...remaining]};
+}
 async function roadMatrix(points){const N=points.length,D=Array.from({length:N},()=>Array(N).fill(null)),T=Array.from({length:N},()=>Array(N).fill(null));let far=new Set(),count=0,blocks=Math.ceil(N/40)**2;for(let a=0;a<N;a+=40)for(let b=0;b<N;b+=40){if(abortRun)throw Error('Cálculo detenido.');const src=Array.from({length:Math.min(40,N-a)},(_,i)=>a+i),dst=Array.from({length:Math.min(40,N-b)},(_,i)=>b+i);const idx=[...new Set([...src,...dst])];const local=new Map(idx.map((v,i)=>[v,i]));const coords=idx.map(i=>points[i][1].toFixed(6)+','+points[i][0].toFixed(6)).join(';');const u='https://router.project-osrm.org/table/v1/driving/'+coords+'?'+new URLSearchParams({sources:src.map(i=>local.get(i)).join(';'),destinations:dst.map(i=>local.get(i)).join(';'),annotations:'distance,duration'});const json=await fetchJSON(u);if(json.code!=='Ok'||!Array.isArray(json.distances)||!Array.isArray(json.durations))throw Error('No hay una matriz de carreteras válida: '+(json.message||json.code||'respuesta incompleta'));src.forEach((r,i)=>dst.forEach((c,j)=>{D[r][c]=json.distances[i]?.[j]??null;T[r][c]=json.durations[i]?.[j]??null;}));(json.sources||[]).forEach((v,i)=>{if(v.distance>200)far.add(src[i]);});(json.destinations||[]).forEach((v,i)=>{if(v.distance>200)far.add(dst[i]);});report('Calculando recorridos por carretera…',55+40*(++count)/blocks);}return {D,T,far};}
-async function calculate(){if(busy)return;if(!confirm('Se enviarán únicamente calles y poblaciones a CartoCiudad, y coordenadas a OSRM para calcular los recorridos. No se envían NIF, teléfonos ni notas. Se conservarán las jornadas ya empezadas. Las direcciones dudosas quedarán aparte, no se inventarán ubicaciones. ¿Calcular ahora?'))return;busy=true;abortRun=false;$('busyPanel').hidden=false;$('stopCalc').disabled=false;const previous=state.days;$('calcError').hidden=true;report('Localizando el punto de salida…',0);try{
+async function calculate(){if(busy)return;if(!confirm('Se enviarán únicamente calles y poblaciones a CartoCiudad, y coordenadas a OSRM para calcular las distancias por carretera. No se envían NIF, teléfonos ni notas. El orden combinará horario público + distancia desde la visita anterior. Los horarios no verificados se marcarán para confirmar y los negocios cerrados temporalmente no se programarán. ¿Optimizar ahora?'))return;busy=true;abortRun=false;$('busyPanel').hidden=false;$('stopCalc').disabled=false;const previous=state.days;$('calcError').hidden=true;report('Localizando el punto de salida…',0);try{
  let depot=await geocode(SEED.origin);if(!depot)throw Error('Primero hay que localizar con precisión la sede. En Herramientas puedes introducir sus coordenadas del portal.');
- const locked=previous.filter(d=>d.ids.some(id=>processed(id))).map(d=>state.stale?{...d,mode:'provisional',km:null,minutes:null,legs:[],needsReview:true}:d);const lockedIds=new Set(locked.flatMap(d=>d.ids));const cs=customers().filter(c=>c.active&&c.id!=='729'&&!lockedIds.has(c.id));let good=[],bad=[];
+ const locked=previous.filter(d=>d.ids.some(id=>processed(id))).map(d=>state.stale?{...d,mode:'hours-approx',km:null,minutes:null,legs:[],needsReview:true}:d);const lockedIds=new Set(locked.flatMap(d=>d.ids));const cs=customers().filter(c=>c.active&&!c.autoRouteExcluded&&c.id!=='729'&&!lockedIds.has(c.id));let good=[],bad=[];
  for(let i=0;i<cs.length;i++){report(`Localizando dirección ${i+1} de ${cs.length} · ${cs[i].town}`,5+50*i/Math.max(1,cs.length));const g=await geocode(cs[i]);if(g)good.push(cs[i]);else bad.push(cs[i].id);if(i%10===0)save();}
  if(!good.length)throw Error('No se localizaron nuevos portales con suficiente precisión. Revisa las fichas sin coordenadas. El borrador anterior sigue disponible.');
  const points=[depot.point],unique=new Map([[depot.point.join(','),0]]),index={};for(const c of good){const point=loc(c).point,k=point.join(',');if(!unique.has(k)){unique.set(k,points.length);points.push(point);}index[c.id]=unique.get(k);}
  const {D,T,far}=await roadMatrix(points);if(far.has(0))throw Error('La sede está demasiado lejos de la vía calculada: confirma su acceso.');const safe=good.filter(c=>!far.has(index[c.id]));good.filter(c=>far.has(index[c.id])).forEach(c=>{bad.push(c.id);state.geocodeFailures[keyOf(c)]='El punto queda a más de 200 m de la vía. Confirma el acceso en coche.';});
  const out=greedyDays(safe.map(c=>c.id),index,D,T,15);if(!out.days.length)throw Error('No se pudo construir ninguna jornada conectada con la sede.');
  const expected=safe.length-out.unreachable.length,actual=out.days.flatMap(d=>d.ids);if(actual.length!==expected||new Set(actual).size!==actual.length)throw Error('La comprobación de integridad ha fallado. No se han aplicado las rutas.');
- if(abortRun)throw Error('Cálculo detenido.');state.days=[...locked,...out.days];state.day=locked.length;state.stale=false;state.lastCalculation={date:new Date().toISOString(),located:good.length,excluded:[...bad,...out.unreachable],count:actual.length,lockedDays:locked.length};save();report('Jornadas calculadas y guardadas.',100);render();toast(`${out.days.length} jornadas nuevas por carretera. ${bad.length+out.unreachable.length} fichas pendientes de ubicación. Las visitas ya empezadas no se han movido.`);
- }catch(e){save();$('calcError').textContent=(abortRun?'Cálculo detenido.':(e.message||'No se pudo conectar con los servicios de mapas.'))+' No se han sustituido las jornadas anteriores. Las ubicaciones ya obtenidas quedan guardadas.';$('calcError').hidden=false;toast('No se ha completado el cálculo por carretera. Se conserva el plan anterior.');}finally{busy=false;$('busyPanel').hidden=true;render();}}
+ if(abortRun)throw Error('Cálculo detenido.');state.days=[...locked,...out.days];state.day=locked.length;state.stale=false;state.lastCalculation={date:new Date().toISOString(),located:good.length,excluded:[...bad,...out.unreachable],count:actual.length,lockedDays:locked.length};save();report('Jornadas por carretera y horarios guardadas.',100);render();toast(`${out.days.length} jornadas optimizadas por carretera + horarios. ${bad.length+out.unreachable.length} fichas requieren ubicación u horario compatible. Las visitas ya empezadas no se han movido.`);
+ }catch(e){save();$('calcError').textContent=(abortRun?'Cálculo detenido.':(e.message||'No se pudo conectar con los servicios de mapas.'))+' No se han sustituido las jornadas anteriores. Las ubicaciones ya obtenidas quedan guardadas.';$('calcError').hidden=false;toast('No se ha completado la optimización por carretera + horarios. Se conserva el plan anterior.');}finally{busy=false;$('busyPanel').hidden=true;render();}}
 function validateImportLegacy(x){if(!x||x.version!==3||!Array.isArray(x.days)||!x.overrides||!x.progress||!x.geo)throw Error('No es una copia válida de MDS Visitas.');const ids=new Set(SEED.clients.map(c=>c.id));const assigned=[];for(const d of x.days){if(!Array.isArray(d.ids)||d.ids.length>15||d.ids.some(id=>!ids.has(String(id))))throw Error('La copia contiene jornadas no válidas.');assigned.push(...d.ids);}if(new Set(assigned).size!==assigned.length)throw Error('La copia repite clientes entre jornadas.');for(const id of Object.keys(x.overrides)){if(!ids.has(id))throw Error('La copia contiene clientes desconocidos.');}return x;}
 
 document.addEventListener('click',e=>{const a=e.target.closest('a[data-route-client]');if(!a)return;const c=customer(a.dataset.routeClient);if(c&&!loc(c)&&!confirm('Esta ubicación no está geocodificada. Google Maps buscará la dirección escrita. Revisa el destino antes de iniciar la navegación.'))e.preventDefault();});
@@ -210,6 +311,19 @@ const clone=x=>JSON.parse(JSON.stringify(x));
 const uid=()=>globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 function baseState(seed){return {version:3,updated:0,overrides:{},progress:{},notes:{},geo:{},geocodeFailures:{},days:clone(seed.days||[]),day:0,tab:'route',stale:false,visitMinutes:20,parkingMinutes:5,dayMinutes:480,crm:{},history:{},drafts:{},mobileSchema:1};}
 function completeState(x){return {...baseState(SEED),...x,crm:x.crm||{},history:x.history||{},drafts:x.drafts||{},notes:x.notes||{},geocodeFailures:x.geocodeFailures||{},mobileSchema:1};}
+
+function migrateStateToEmbedded(x){
+ const ids=new Set(EMBEDDED_SEED.clients.map(c=>String(c.id))),out=completeState(clone(x||{}));
+ const filterById=obj=>Object.fromEntries(Object.entries(obj||{}).filter(([id])=>ids.has(String(id))));
+ out.overrides=filterById(out.overrides);out.progress=filterById(out.progress);out.notes=filterById(out.notes);out.crm=filterById(out.crm);out.history=filterById(out.history);
+ out.drafts=Object.fromEntries(Object.entries(out.drafts||{}).filter(([key])=>{const id=String(key).split(':').at(-1);return ids.has(id);}));
+ out.days=clone(EMBEDDED_SEED.days||[]);out.day=Math.max(0,Math.min(Number(out.day)||0,Math.max(0,out.days.length-1)));delete out.lastCalculation;
+ // Se conservan correcciones/notas del usuario. Si cambió una dirección o la inclusión,
+ // se avisa para que pueda recalcular la distancia exacta.
+ out.stale=Object.values(out.overrides||{}).some(v=>v&&(v.address!==undefined||v.town!==undefined||v.cp!==undefined||v.active!==undefined));
+ return out;
+}
+
 function bundle(){return {format:MOBILE_FORMAT,schema:1,exportedAt:new Date().toISOString(),seed:SEED,state};}
 function openDB(){return new Promise((resolve,reject)=>{if(!globalThis.indexedDB)return reject(Error('Base local no disponible.'));let settled=false;const request=indexedDB.open(MOBILE_DB,1);const timer=setTimeout(()=>{settled=true;reject(Error('La base local no respondió.'));},5000);request.onupgradeneeded=()=>{if(!request.result.objectStoreNames.contains('kv'))request.result.createObjectStore('kv');};request.onsuccess=()=>{clearTimeout(timer);if(settled){request.result.close();return;}request.result.onversionchange=()=>request.result.close();resolve(request.result);};request.onerror=()=>{clearTimeout(timer);reject(request.error);};request.onblocked=()=>{clearTimeout(timer);reject(Error('Cierra otras ventanas de esta app.'));};});}
 function dbRead(){return new Promise((resolve,reject)=>{const t=db.transaction('kv','readonly'),r=t.objectStore('kv').get('bundle');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
@@ -252,13 +366,28 @@ async function importBackup(file,ask=true){
  const raw=await file.text();const data=JSON.parse(raw,(key,value)=>{if(['__proto__','constructor','prototype'].includes(key))throw Error('La copia contiene una clave no permitida.');return value;});
  const incoming=parseBackup(data);
  if(ask&&SEED.clients.length&&!confirm('Se sustituirá la base y las anotaciones de este dispositivo por la copia seleccionada. Exporta antes tus avances si debes conservarlos. ¿Restaurar?'))return false;
- SEED=clone(incoming.seed);state=completeState(clone(incoming.state));state.tab='route';state.day=Math.max(0,Math.min(state.day,state.days.length-1));remoteConflict=false;detailId=null;
+ const useEmbedded=EMBEDDED_SEED.clients.length&&incoming.seed?.dataRevision!==EMBEDDED_SEED.dataRevision;SEED=useEmbedded?clone(EMBEDDED_SEED):clone(incoming.seed);state=useEmbedded?migrateStateToEmbedded(clone(incoming.state)):completeState(clone(incoming.state));state.tab='route';state.day=Math.max(0,Math.min(state.day,state.days.length-1));remoteConflict=false;detailId=null;
  const ok=await save();render();toast(ok?'Clientes y jornadas guardados en este dispositivo.':'Datos cargados, pero no se han podido guardar. Exporta una copia antes de cerrar.');return ok;
 }
 function statusLabel(id){return done(id)?'Realizada':state.progress[id]?.status==='skip'?'Pospuesta':'Pendiente';}
-function clientSheet(c,i,cs,d,nextId){const priority=state.crm[c.id]?.priority;return `<button type="button" class="visit compact-client ${c.id===nextId?'current':''} ${done(c.id)?'completed':''}" data-open="${E(c.id)}" aria-label="Abrir ficha completa de ${E(shownName(c))}"><span class="stopnum">${done(c.id)?'✓':String(i+1).padStart(2,'0')}</span><span class="compact-main"><strong>${E(shownName(c))}</strong><span class="compact-address">${E(c.address)} · ${E(c.town)}</span><span class="compact-meta">${c.id===nextId?'Siguiente visita':statusLabel(c.id)}${priority==='Alta'?' · Prioridad alta':''}${(state.history[c.id]||[]).length?' · Con historial':''}</span></span><span class="chevron" aria-hidden="true">›</span></button>`;}
-function renderClients(){const q=norm(searchValue);const rows=customers().filter(c=>(!q||norm([c.title,c.commercialName,c.commercialRaw,c.name,c.contact,c.phone,c.mobile,c.email,c.town,c.address,c.id,c.nif,state.notes[c.id]].join(' ')).includes(q))&&(filterValue==='all'||filterValue==='active'&&c.active||filterValue==='hold'&&!c.active||filterValue==='changed'&&c.change||filterValue==='unlocated'&&c.active&&!loc(c)));$('clientCount').textContent=rows.length+' clientes · toca uno para ver su ficha';$('customerList').innerHTML=rows.map(c=>`<button type="button" class="compact-client catalog-client" data-open="${E(c.id)}" aria-label="Abrir ficha completa de ${E(shownName(c))}"><span class="initials">${E(shownName(c).split(/\s+/).slice(0,2).map(s=>s[0]).join(''))}</span><span class="compact-main"><strong>${E(shownName(c))}</strong><span class="compact-address">${E(c.town)} · ${E(c.address)}</span><span class="compact-meta">#${E(c.id)}${!c.active?' · Apartado para revisión':''}${state.crm[c.id]?.followUp?' · Seguimiento '+E(state.crm[c.id].followUp):''}</span></span><span class="chevron" aria-hidden="true">›</span></button>`).join('')||'<p class="empty">No hay clientes con este filtro.</p>';}
-function render(){renderBase();$('welcomePanel').hidden=SEED.clients.length>0;document.querySelector('main.container').hidden=!SEED.clients.length;document.querySelector('.mobilenav').hidden=!SEED.clients.length;if(SEED.clients.length){$('headerSummary').textContent=customers().length+' clientes · guardados en este móvil';const cs=routeClients(state.days[state.day]),c=cs.find(x=>!processed(x.id));if(c){$('nextName').dataset.open=c.id;$('nextName').setAttribute('role','button');$('nextName').setAttribute('tabindex','0');$('nextName').setAttribute('aria-label','Abrir ficha de '+shownName(c));$('editNext').dataset.id=c.id;}const baseOnly=state.days.every(d=>d.mode!=='road');$('planHint').textContent=baseOnly?'Se mantienen las jornadas provisionales del archivo anterior. No se ha realizado una nueva optimización.':'Se mantiene el cálculo guardado; revisa los avisos de dirección y duración.';}
+function clientSheet(c,i,cs,d,nextId){
+ const priority=state.crm[c.id]?.priority,stop=plannedStop(d,c.id),dayKey=stop?.weekday||d.weekday||DAY_KEYS[new Date().getDay()];
+ const planned=stop?.plannedArrival?` · Previsto ${stop.plannedArrival}`:'';
+ const schedule=stop?.openingStatusAtPlan|| (hasPublicHours(c)?dayHours(c,dayKey):'Horario por confirmar');
+ const scheduleClass=isTempClosed(c)?'closed':hasPublicHours(c)?'open':'unknown';
+ return `<button type="button" class="visit compact-client ${c.id===nextId?'current':''} ${done(c.id)?'completed':''}" data-open="${E(c.id)}" aria-label="Abrir ficha completa de ${E(shownName(c))}"><span class="stopnum">${done(c.id)?'✓':String(i+1).padStart(2,'0')}</span><span class="compact-main"><strong>${E(shownName(c))}</strong><span class="compact-address">${E(c.address)} · ${E(c.town)}</span><span class="compact-hours ${E(scheduleClass)}">${E(schedule)}${E(planned)}</span><span class="compact-meta">${c.id===nextId?'Siguiente visita':statusLabel(c.id)}${priority==='Alta'?' · Prioridad alta':''}${(state.history[c.id]||[]).length?' · Con historial':''}</span></span><span class="chevron" aria-hidden="true">›</span></button>`;
+}
+function renderClients(){
+ const q=norm(searchValue);
+ const rows=customers().filter(c=>{
+   const match=!q||norm([c.title,c.commercialName,c.commercialRaw,c.name,c.contact,c.phone,c.mobile,c.email,c.town,c.address,c.id,c.nif,state.notes[c.id],hoursInfo(c).sourceName].join(' ')).includes(q);
+   const filter=filterValue==='all'||filterValue==='active'&&c.active&&!c.autoRouteExcluded||filterValue==='hold'&&(!c.active||c.autoRouteExcluded)||filterValue==='changed'&&c.change||filterValue==='unlocated'&&c.active&&!loc(c)||filterValue==='hours'&&hasPublicHours(c)||filterValue==='nohours'&&!hasPublicHours(c)&&!isTempClosed(c)||filterValue==='tempclosed'&&isTempClosed(c);
+   return match&&filter;
+ });
+ $('clientCount').textContent=rows.length+' clientes · toca uno para ver su ficha';
+ $('customerList').innerHTML=rows.map(c=>{const live=currentOpenState(c);return `<button type="button" class="compact-client catalog-client" data-open="${E(c.id)}" aria-label="Abrir ficha completa de ${E(shownName(c))}"><span class="initials">${E(shownName(c).split(/\s+/).slice(0,2).map(s=>s[0]).join(''))}</span><span class="compact-main"><strong>${E(shownName(c))}</strong><span class="compact-address">${E(c.town)} · ${E(c.address)}</span><span class="compact-hours ${E(live.class)}">${E(live.label)}</span><span class="compact-meta">#${E(c.id)}${!c.active||c.autoRouteExcluded?' · Fuera de ruta automática':''}${state.crm[c.id]?.followUp?' · Seguimiento '+E(state.crm[c.id].followUp):''}</span></span><span class="chevron" aria-hidden="true">›</span></button>`}).join('')||'<p class="empty">No hay clientes con este filtro.</p>';
+}
+function render(){renderBase();$('welcomePanel').hidden=SEED.clients.length>0;document.querySelector('main.container').hidden=!SEED.clients.length;document.querySelector('.mobilenav').hidden=!SEED.clients.length;if(SEED.clients.length){$('headerSummary').textContent=customers().length+' clientes · guardados en este móvil';const cs=routeClients(state.days[state.day]),c=cs.find(x=>!processed(x.id));if(c){$('nextName').dataset.open=c.id;$('nextName').setAttribute('role','button');$('nextName').setAttribute('tabindex','0');$('nextName').setAttribute('aria-label','Abrir ficha de '+shownName(c));$('editNext').dataset.id=c.id;}const baseOnly=state.days.every(d=>!String(d.mode||'').startsWith('road'));$('planHint').textContent=baseOnly?'Las jornadas integradas ya tienen en cuenta horarios públicos y cercanía aproximada. Pulsa para sustituir la distancia aproximada por carretera exacta.':'Se mantiene el cálculo por carretera y horarios guardado; revisa los avisos y las fichas sin horario verificado.';}
  updateConnectivity();showStorage();}
 function eventEntry(id,type,text,extra={}){const item={id:uid(),date:new Date().toISOString(),type,text,...extra};(state.history[id]??=[]).push(item);return item.id;}
 function detailRefresh(){if(detailId&&$('detailDialog').open)fillDetails(detailId);}
@@ -320,7 +449,7 @@ async function bootMobile(){
  const local=safelyReadLocal(MOBILE_STORE);if(local?.format===MOBILE_FORMAT){try{validateStateFor(local.state,local.seed);saved.push(local);}catch{lastStorageError='Se ha ignorado un respaldo local no válido.';}}
  if(SNAP&&SEED.clients.length){try{validateStateFor(SNAP,SEED);saved.push({seed:SEED,state:SNAP});}catch{}}
  if(SEED.clients.length){const legacy=safelyReadLocal(STORE);if(legacy?.version===3){try{validateStateFor(legacy,SEED);saved.push({seed:SEED,state:legacy});}catch{}}}
- if(saved.length){saved.sort((a,b)=>(b.state.updated||0)-(a.state.updated||0));SEED=clone(saved[0].seed);state=completeState(clone(saved[0].state));}else state=completeState(state);
+ if(saved.length){saved.sort((a,b)=>(b.state.updated||0)-(a.state.updated||0));const best=saved[0],useEmbedded=EMBEDDED_SEED.clients.length&&best.seed?.dataRevision!==EMBEDDED_SEED.dataRevision;SEED=useEmbedded?clone(EMBEDDED_SEED):clone(best.seed);state=useEmbedded?migrateStateToEmbedded(clone(best.state)):completeState(clone(best.state));}else{SEED=clone(EMBEDDED_SEED);state=completeState(state);}
  if(SEED.clients.length)await save();else{storageOK=!!db;lastSaveOK=storageOK;}
  render();$('bootOverlay').hidden=true;
  const g=loc(SEED.origin);if(g)$('originCoordinates').value=g.point.join(', ');

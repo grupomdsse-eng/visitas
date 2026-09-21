@@ -1,31 +1,47 @@
-# MDS Visitas · Android
+# MDS Visitas · Android 1.0.3
 
-Aplicación Android para tus visitas comerciales, con las fichas completas al pulsar un cliente, historial editable y guardado local. Este proyecto convierte la versión móvil suministrada en un APK, sin publicar una web y sin incluir la base privada en el código.
+Aplicación Android para organizar visitas comerciales de Grupo MDS.
 
-## Generar el APK en GitHub
+Esta edición incorpora **las 335 fichas de clientes dentro del APK**, junto con las jornadas ordenadas y la revisión pública de horarios realizada el 21/09/2026. La aplicación permite abrir la ficha completa, editar datos, añadir notas e historial, registrar visitas y navegar con Google Maps.
 
-### 1. Crea el repositorio
+## IMPORTANTE · repositorio privado
 
-Crea un repositorio **privado** en GitHub, por ejemplo `mds-visitas-android`.
+Este proyecto contiene datos reales de clientes dentro de `app/src/main/assets/site/index.html` (contactos, direcciones y otros datos de la base). **Usa un repositorio PRIVADO.** No publiques el proyecto, no lo conviertas en público y no pegues sus archivos en issues públicos.
 
-### 2. Añade la firma privada una sola vez
+## Qué incluye
 
-En el repositorio, entra en **Settings → Secrets and variables → Actions → New repository secret**.
+- 335 fichas de clientes integradas.
+- 20 jornadas precalculadas. Las primeras se completan hasta 15 visitas; las últimas pueden tener menos cuando no existe una combinación segura que permita llegar a 15 dentro de los horarios conocidos.
+- Horarios públicos buscados individualmente para las 335 fichas.
+- 248 fichas con horario público utilizable.
+- 1 ficha localizada como cerrada temporalmente.
+- 86 fichas sin horario público inequívoco: se muestran como **“Horario no verificado”** y deben confirmarse antes de desplazarse.
+- Direcciones públicas actualizadas cuando la evidencia era suficientemente fuerte.
+- Orden inicial por horario de apertura + cercanía geográfica aproximada.
+- Botón **“Optimizar carretera + horarios”**: localiza portales con CartoCiudad, obtiene una matriz de carretera con OSRM y vuelve a elegir el siguiente cliente según apertura + distancia desde la parada anterior.
+- Google Maps para la navegación final.
+- Guardado privado en Android, notas, historial, edición, copias de seguridad y restauración.
 
-- **Name:** `MDS_ANDROID_SIGNING`
-- **Secret:** abre el archivo **MDS_Firma_Privada.txt** entregado aparte, copia **todo su contenido** y pégalo aquí. No hay que descodificarlo, cambiarlo ni escribir otras contraseñas.
+Los horarios públicos pueden cambiar por festivos, verano, incidencias o cambios del negocio. La app conserva fecha, fuente asociada y nivel de confianza cuando existe. Una ficha sin horario no se presenta como “abierta”.
 
-Pulsa **Add secret**. Conserva el archivo original en un lugar privado. No lo subas como un archivo del repositorio y no lo pegues en un issue, comentario o registro de ejecución.
+## Generar automáticamente el APK en GitHub
 
-Esta firma se reutiliza para que los nuevos APK puedan actualizar la misma aplicación. `FIRMA_PUBLICA.txt` contiene solo la huella pública de comprobación, no la clave.
+### 1. Crea un repositorio privado
 
-**Sin este secreto también se genera un APK, pero será `MDS-Visitas-PRUEBAS.apk`.** Esa edición usa un identificador separado, no sustituye la edición de trabajo y su firma puede cambiar entre compilaciones. No la uses como copia única de tus datos. Para uso diario añade el secreto y vuelve a ejecutar el flujo.
+Por ejemplo `mds-visitas-android`.
 
-### 3. Sube el contenido del proyecto, no el ZIP
+### 2. Configura la firma
 
-Descomprime el ZIP del proyecto. En GitHub pulsa **Add file → Upload files** y arrastra **todo el contenido descomprimido**.
+En **Settings → Secrets and variables → Actions → New repository secret**:
 
-En la raíz del repositorio deben quedar directamente:
+- Name: `MDS_ANDROID_SIGNING`
+- Secret: pega el contenido completo de `MDS_Firma_Privada.txt` que ya tienes de las versiones anteriores.
+
+No subas la clave privada al repositorio.
+
+### 3. Sube el contenido descomprimido
+
+En la raíz deben quedar directamente:
 
 ```text
 .github/workflows/android-apk.yml
@@ -39,93 +55,76 @@ version.properties
 README.md
 ```
 
-Incluye también `.gitignore`, `.gitattributes` y los documentos. **La carpeta `.github` es imprescindible.** No debe quedar dentro de otra carpeta como `proyecto/.github`, ni debe subirse únicamente el archivo ZIP.
+No subas únicamente el ZIP y no metas el proyecto dentro de otra carpeta.
 
-Pulsa **Commit changes**. No subas `CLIENTES_MDS.json`, copias de seguridad o el archivo de firma.
+### 4. Genera el APK
 
-### 4. Descarga el resultado
+GitHub → **Actions → Generar APK Android → Run workflow**.
 
-Entra en **Actions → Generar APK Android → ejecución más reciente**.
+Cuando finalice correctamente, descarga **Artifacts → MDS-Visitas-APK**. El APK de trabajo será `MDS-Visitas.apk` cuando la firma esté configurada.
 
-La compilación arranca con cada subida de cambios a una rama. También puedes iniciarla desde **Run workflow** cuando el flujo ya esté en la rama principal. Si GitHub pide habilitar Actions, actívalo para este repositorio.
+## Actualizar una instalación existente
 
-Cuando la ejecución termine en verde, abre **Artifacts → MDS-Visitas-APK**. Descarga y extrae ese ZIP. Dentro aparecerán:
+Esta versión mantiene el identificador `com.grupomds.visitas`. Si utilizas la misma firma, instala el nuevo APK encima del anterior **sin desinstalar**.
 
-```text
-MDS-Visitas.apk
-INSTALAR.txt
-SHA256.txt
-```
+La aplicación migra a la base integrada de 1.0.3 y conserva, por código de cliente, las notas, historial, visitas, información comercial y correcciones que ya hubieras guardado. Las jornadas se sustituyen por la nueva planificación de horarios; si has modificado manualmente direcciones o inclusión de clientes, la app lo marca para recalcular.
 
-También hay un botón de descarga en el resumen de la ejecución. Los artefactos de este proyecto se conservan durante **30 días**, sujetos a la configuración y límites de tu cuenta; conserva tu APK descargado. No confundas el ZIP de código con el ZIP que contiene el APK.
+Haz una copia de seguridad antes de actualizar.
 
-### 5. Instala y carga los clientes
+## Cómo se ordenan las visitas
 
-Pasa `MDS-Visitas.apk` y `CLIENTES_MDS.json` a tu teléfono Android. Abre el APK. Si Android lo solicita, permite a esa aplicación de archivos o navegador instalar esta aplicación; no es necesario desactivar Play Protect. Al terminar puedes retirar ese permiso de instalación.
+La planificación integrada utiliza un criterio secuencial:
 
-Abre **MDS Visitas → Cargar mis clientes** y selecciona `CLIENTES_MDS.json`. La base se importa **una sola vez en ese móvil**. También admite una copia JSON de esta app. Para una copia antigua que solo incluya avances y no la base, importa primero los clientes y después restaura la copia.
+1. Cada nuevo día parte de la sede de C/ Aragón 1, Dos Hermanas.
+2. Se estima la hora de llegada.
+3. Se descartan, para ese momento, negocios cuyo horario público indica que estarían cerrados.
+4. Entre los negocios visitables se prioriza el más cercano desde la ubicación anterior.
+5. Si un negocio abre más tarde, se intenta visitar antes otro abierto en vez de esperar.
+6. Las fichas sin horario inequívoco solo se colocan en una franja prudente y aparecen como **“confirmar antes”**.
+7. Al llegar a 15 visitas se inicia una nueva jornada desde la sede.
 
-**El APK y el repositorio no contienen tus 335 fichas privadas.** El archivo se lee en el móvil y no se sube a GitHub ni a un servidor. Las anotaciones añadidas en tu copia anterior no pueden recuperarse de este proyecto: exporta tus avances desde aquella copia y restáuralos en Android.
+El orden integrado usa coordenadas aproximadas por código postal para poder disponer de una planificación desde el primer arranque. Para distancia de carretera real, usa **Optimizar carretera + horarios** dentro de la app. Ese cálculo no usa tráfico en tiempo real y no constituye un óptimo matemático global: aplica el criterio solicitado de elegir secuencialmente el cliente visitable más cercano.
 
-## Uso diario
+## Horarios y estados
 
-En **Mi jornada**, toca un cliente para abrir su ficha completa. En la ficha puedes **Añadir información**, **Editar datos** y registrar una visita. Las notas se añaden al historial con fecha. Los borradores se guardan mientras escribes; confirma los cambios con el botón Guardar correspondiente.
+Al pulsar un cliente se muestra:
 
-En **Herramientas → Copia de seguridad**, Android abre su selector de guardado. Elige una carpeta y confirma. La aplicación solo avisa de copia guardada cuando Android termina la escritura. Cancelar el selector no borra los datos ni se presenta como una copia completada.
+- horario semanal encontrado;
+- estado “abierto ahora / cerrado ahora / horario no verificado”;
+- nivel de confianza del horario;
+- fecha de comprobación;
+- negocio/fuente asociada y enlace para volver a comprobar el horario en Google;
+- datos completos del cliente, dirección original, revisión, contacto, teléfono, correo, NIF/CIF, notas e historial.
 
-Google Maps, llamadas, correo y fuentes públicas se abren con las aplicaciones externas del teléfono. No se realiza ninguna llamada ni se envía un correo sin tu intervención.
+En **Clientes** puedes filtrar por:
 
-La aplicación y los datos locales pueden consultarse y editarse sin Internet. Recalcular rutas, buscar direcciones y utilizar los servicios de mapas requiere conexión. La lógica y las advertencias de las jornadas del archivo anterior se conservan: **convertir a APK no valida las direcciones ni convierte el borrador en una ruta óptima verificada**.
+- con horario público;
+- horario por confirmar;
+- cerrado temporalmente;
+- incluidos en planificación;
+- apartados;
+- dirección actualizada.
 
-## Actualizar sin perder datos
+## Privacidad y almacenamiento
 
-Conserva **el mismo repositorio, secreto de firma e identificador** `com.grupomds.visitas`. Sube la actualización; GitHub genera otro APK con un código de versión mayor. Instálalo encima de la app existente, **sin desinstalar primero**.
+Los datos se guardan en el almacenamiento privado de la aplicación Android y en su base local. No existe sincronización automática entre teléfonos.
 
-Exporta una copia JSON antes de actualizar. No cambies ni regeneres la firma entre versiones. La edición de pruebas es otra aplicación (`com.grupomds.visitas.pruebas`) y no comparte datos: para pasar de pruebas a producción, exporta e importa.
+El cálculo de rutas envía únicamente direcciones a CartoCiudad y coordenadas a OSRM. No envía NIF, teléfonos, correos ni notas a esos servicios. Google Maps se abre de forma externa cuando tú pulsas navegar.
 
-Si trasladas el proyecto a otro repositorio, conserva el secreto y ajusta `versionCodeBase` para que el nuevo código de versión supere al del APK ya instalado.
+Borrar los datos de Android o desinstalar la aplicación elimina los avances locales. Conserva copias JSON periódicas.
 
-## Dónde se guarda la información
+## Compatibilidad
 
-El APK incorpora los archivos de la aplicación. La base editable se guarda en IndexedDB y en un respaldo nativo con escritura atómica dentro de **los datos privados de Android**, no solo en la caché temporal. El respaldo nativo se recupera al abrir la app si es más reciente.
+- Android 8.0 (API 26) o posterior.
+- Java 17.
+- compileSdk / targetSdk 35.
+- Lint permanece activo con `abortOnError true`.
+- `windowLightNavigationBar` está aislado en `values-v27` para mantener compatibilidad con API 26.
 
-No se usa un servidor de clientes ni se sincroniza entre comerciales. Cada teléfono mantiene su copia. El proyecto desactiva las copias automáticas del sistema para estos datos; usa la exportación manual. Desinstalar o borrar los datos de la aplicación elimina la información local. Los JSON exportados contienen información privada sin cifrar: protégelos y no los subas al repositorio.
-
-## Requisitos y compilación
-
-Android **8.0 o posterior** con Android System WebView actualizado. El proyecto usa Java 17, Gradle 8.11.1, Android Gradle Plugin 8.9.2, SDK/Build Tools 35 y AndroidX WebKit 1.12.1, con versiones fijadas por compatibilidad.
-
-**No necesitas Android Studio en tu ordenador para el flujo de GitHub.** El runner instala las herramientas. Este paquete no incluye el binario de Gradle Wrapper: el flujo usa el Gradle instalado mediante `setup-gradle`. Con las herramientas instaladas localmente, puedes ejecutar:
+## Comprobación local
 
 ```sh
 bash scripts/check.sh
-gradle :app:assembleDebug
 ```
 
-Para compilar release localmente debes proporcionar `MDS_KEYSTORE_PATH`, `MDS_KEYSTORE_PASSWORD` y `MDS_KEY_ALIAS`. El script de GitHub ya lo hace desde el único secreto.
-
-El flujo no crea Releases ni publica en Google Play: deja el APK como artefacto descargable. La instalación desde APK es para Android, no iPhone.
-
-## Si algo falla
-
-| Qué ves | Qué revisar |
-|---|---|
-| No aparece «Generar APK Android» | Comprueba que `.github/workflows/android-apk.yml` está en la raíz y que no subiste solo un ZIP. |
-| «MDS_ANDROID_SIGNING no es válido» | Copia todo el contenido original del archivo de firma, sin añadir texto ni cambiar comillas. Guarda el secreto y vuelve a ejecutar. |
-| APK «PRUEBAS» | Falta el secreto. Añádelo y ejecuta de nuevo para la edición de uso diario. |
-| GitHub no inicia trabajos o indica límite de uso | Revisa que Actions esté permitido y las cuotas/configuración de tu cuenta. |
-| Fallo descargando Android/Gradle/dependencias | Revisa el primer paso rojo y su registro; reintenta si hubo un fallo de red. No borres los datos del móvil. |
-| Android no permite actualizar | Comprueba que es la misma edición, firma y un código de versión no inferior. Exporta datos; no desinstales como primer remedio. |
-| No aparecen los clientes | Pulsa «Cargar mis clientes» y selecciona tu JSON local. El APK no los incluye. |
-
-## Estado de comprobación
-
-Se comprobaron la sintaxis JavaScript, XML, estructura del proyecto, 29 condiciones de política de enlaces y la interfaz en Chromium con el puente Android simulado. Se probó importar las 335 fichas, abrir detalles, añadir notas, editar, cancelar/exportar y restaurar desde ese puente simulado.
-
-**No se ha compilado el APK ni probado en un dispositivo Android en este entorno.** La compilación, el análisis Android y la verificación de firma se ejecutan realmente en tu cuenta de GitHub. El guardado del selector de archivos y el funcionamiento en tu teléfono deben verificarse allí antes de usarlo como única herramienta de trabajo.
-
-Consulta `COMPROBACIONES.md`, `PRIVACIDAD.md` y `FUENTES_TECNICAS.md` para más detalle.
-
-
-## Corrección 1.0.1 - Android Lint NewApi
-Se han separado las llamadas WindowInsets de API 30+ en un método protegido por versión y se han marcado los atributos modernos del manifiesto. Lint sigue activo (`abortOnError true`); no se ha desactivado la comprobación global.
+La compilación real Android y el análisis Lint se ejecutan en GitHub Actions.
