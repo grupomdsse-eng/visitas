@@ -1,0 +1,130 @@
+name: Generar APK Android
+run-name: APK MDS Visitas · ${{ github.run_number }}
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mds-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compilar y entregar APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Descargar el proyecto
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Preparar Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Comprobar archivos y seguridad
+        run: bash scripts/check.sh
+
+      - name: Preparar Gradle compatible
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.11.1'
+          cache-provider: basic
+          cache-disabled: true
+
+      - name: Preparar firma sin publicarla
+        env:
+          MDS_ANDROID_SIGNING: ${{ secrets.MDS_ANDROID_SIGNING }}
+        run: python3 scripts/prepare_signing.py
+
+      - name: Preparar Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_HOME="$SDK_ROOT"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          SDK_MANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDK_MANAGER" ]; then
+            SDK_MANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort | tail -n 1)"
+          fi
+          if [ ! -x "$SDK_MANAGER" ]; then
+            echo "::error::No se encuentra sdkmanager en el runner. Usa ubuntu-24.04 de GitHub."
+            exit 1
+          fi
+          set +o pipefail
+          yes | "$SDK_MANAGER" --licenses > /dev/null
+          STATUS=${PIPESTATUS[1]}
+          set -o pipefail
+          if [ "$STATUS" -ne 0 ]; then exit "$STATUS"; fi
+          "$SDK_MANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Compilar y revisar Android
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(sed -n 's/^versionCodeBase=//p' version.properties | tr -d '\r')"
+          VERSION_CODE=$((BASE + GITHUB_RUN_NUMBER))
+          if [ "$MDS_BUILD_KIND" = "release" ]; then
+            gradle --no-daemon --console=plain -PmdsVersionCode="$VERSION_CODE" :app:assembleRelease :app:lintRelease
+          else
+            gradle --no-daemon --console=plain -PmdsVersionCode="$VERSION_CODE" :app:assembleDebug :app:lintDebug
+          fi
+
+      - name: Preparar APK descargable
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p entrega
+          if [ "$MDS_BUILD_KIND" = "release" ]; then
+            cp app/build/outputs/apk/release/app-release.apk entrega/MDS-Visitas.apk
+            echo "Edición de uso diario. Importa los clientes al abrirla. No desinstales para actualizar." > entrega/INSTALAR.txt
+          else
+            cp app/build/outputs/apk/debug/app-debug.apk entrega/MDS-Visitas-PRUEBAS.apk
+            echo "Edición de pruebas: configura MDS_ANDROID_SIGNING antes de usarla a diario. La firma de pruebas puede cambiar. Exporta datos antes de sustituirla." > entrega/INSTALAR.txt
+          fi
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose entrega/*.apk
+          (cd entrega && sha256sum *.apk > SHA256.txt)
+
+      - name: Descargar MDS Visitas APK
+        id: apk
+        uses: actions/upload-artifact@v7
+        with:
+          name: MDS-Visitas-APK
+          path: entrega/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Instrucciones de descarga
+        env:
+          APK_URL: ${{ steps.apk.outputs.artifact-url }}
+        run: |
+          echo "## APK generado" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Descargar MDS Visitas APK]($APK_URL)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Extrae el ZIP de Artifacts y abre el archivo .apk en Android." >> "$GITHUB_STEP_SUMMARY"
+          echo "Los clientes no están incluidos en el APK: cárgalos una sola vez desde CLIENTES_MDS.json o una copia de seguridad." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$MDS_BUILD_KIND" != "release" ]; then
+            echo "**AVISO: edición de pruebas. Añade MDS_ANDROID_SIGNING y ejecuta de nuevo para obtener la edición de uso diario con firma estable.**" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Guardar diagnóstico si falla
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Diagnostico-compilacion
+          path: app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Borrar la firma del runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/mds-signing"
