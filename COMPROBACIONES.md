@@ -46,3 +46,8 @@ Las pruebas usaron los datos aportados solo localmente. No se incluyen datos de 
 Instala el APK, importa los datos, abre una ficha y añade una nota de prueba. Cierra y vuelve a abrir la aplicación para comprobar que sigue allí. Activa modo avión y repite la consulta y edición. Exporta una copia JSON a una carpeta conocida y comprueba que está disponible. Conserva una copia externa antes de cualquier actualización.
 
 La conversión a Android no realiza una nueva validación de clientes ni una nueva optimización de rutas. Se conservan los datos y avisos del proyecto anterior.
+
+## Corrección v1.0.2
+- `android:windowLightNavigationBar` se ha retirado de `res/values/styles.xml` porque requiere API 27.
+- El atributo se define ahora exclusivamente en `res/values-v27/styles.xml`.
+- Se mantiene `minSdk 26`; Android 8.0 usa el tema base y Android 8.1+ usa el recurso v27.
