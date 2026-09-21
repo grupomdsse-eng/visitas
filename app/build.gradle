@@ -1,0 +1,55 @@
+plugins { id 'com.android.application' }
+def versionProps = new Properties()
+rootProject.file('version.properties').withInputStream { versionProps.load(it) }
+def signingPath = System.getenv('MDS_KEYSTORE_PATH')
+def hasPrivateKey = signingPath != null && new File(signingPath).isFile()
+android {
+    namespace 'com.grupomds.visitas'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+    defaultConfig {
+        applicationId 'com.grupomds.visitas'
+        minSdk 26
+        targetSdk 35
+        versionCode Integer.parseInt(project.findProperty('mdsVersionCode') ?: versionProps.getProperty('versionCodeBase'))
+        versionName versionProps.getProperty('versionName')
+    }
+    signingConfigs {
+        if (hasPrivateKey) {
+            privateRelease {
+                storeFile file(signingPath)
+                storePassword System.getenv('MDS_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('MDS_KEY_ALIAS')
+                keyPassword System.getenv('MDS_KEYSTORE_PASSWORD')
+                storeType 'PKCS12'
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            applicationIdSuffix '.pruebas'
+            versionNameSuffix '-pruebas'
+            resValue 'string', 'app_name', 'MDS Visitas Pruebas'
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+            debuggable false
+            resValue 'string', 'app_name', 'MDS Visitas'
+            if (hasPrivateKey) signingConfig signingConfigs.privateRelease
+        }
+    }
+    buildFeatures { buildConfig true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    lint { abortOnError true; checkReleaseBuilds true }
+}
+dependencies { implementation 'androidx.webkit:webkit:1.12.1' }
+// Evita entregar por accidente un APK release sin firmar.
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.name in ['assembleRelease', 'bundleRelease'] } && !hasPrivateKey) {
+        throw new GradleException('Falta la firma privada. Configura MDS_ANDROID_SIGNING en GitHub, o compila assembleDebug para probar.')
+    }
+}

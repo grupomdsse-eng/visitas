@@ -1,0 +1,5 @@
+Huella SHA-256 del certificado de firma suministrado:
+49:7E:C7:1C:99:D7:36:AF:C3:82:8A:EF:EC:A2:D2:F4:8E:2F:FA:37:C1:FC:55:95:AB:4B:11:A9:DC:44:42:E4
+
+Este archivo NO contiene la clave privada y sí puede subirse al repositorio.
+Conserva MDS_Firma_Privada.txt fuera del repositorio. Su contenido va en el secreto MDS_ANDROID_SIGNING.
