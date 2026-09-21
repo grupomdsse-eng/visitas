@@ -1,6 +1,7 @@
 package com.grupomds.visitas;
 
 import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
@@ -72,25 +73,34 @@ public final class MainActivity extends Activity {
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.WHITE);
         setContentView(root);
+        // Keep API 30+ calls in an explicitly version-gated method so Android Lint can
+        // prove that no Android 8-10 device will execute newer WindowInsets APIs.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            installModernInsets();
+        } else {
+            installLegacyInsets();
+        }
+        root.requestApplyInsets();
+        createWebView();
+    }
+
+    @TargetApi(Build.VERSION_CODES.R)
+    private void installModernInsets() {
         root.setOnApplyWindowInsetsListener((view, insets) -> {
-            if (Build.VERSION.SDK_INT >= 30) {
-                Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-                Insets ime = insets.getInsets(WindowInsets.Type.ime());
-                view.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
-            } else {
-                view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
-                    insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
-            }
-            return Build.VERSION.SDK_INT >= 30 ? WindowInsets.CONSUMED : insets.consumeSystemWindowInsets();
+            Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            Insets ime = insets.getInsets(WindowInsets.Type.ime());
+            view.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
+            return WindowInsets.CONSUMED;
         });
-        // CONSUMED was added in API 30; for Android 8-10 use the legacy listener instead.
-        if (Build.VERSION.SDK_INT < 30) root.setOnApplyWindowInsetsListener((view, insets) -> {
+    }
+
+    @SuppressWarnings("deprecation")
+    private void installLegacyInsets() {
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
             view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
                 insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
             return insets.consumeSystemWindowInsets();
         });
-        root.requestApplyInsets();
-        createWebView();
     }
 
     @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})

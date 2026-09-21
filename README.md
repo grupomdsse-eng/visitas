@@ -125,3 +125,7 @@ Se comprobaron la sintaxis JavaScript, XML, estructura del proyecto, 29 condicio
 **No se ha compilado el APK ni probado en un dispositivo Android en este entorno.** La compilación, el análisis Android y la verificación de firma se ejecutan realmente en tu cuenta de GitHub. El guardado del selector de archivos y el funcionamiento en tu teléfono deben verificarse allí antes de usarlo como única herramienta de trabajo.
 
 Consulta `COMPROBACIONES.md`, `PRIVACIDAD.md` y `FUENTES_TECNICAS.md` para más detalle.
+
+
+## Corrección 1.0.1 - Android Lint NewApi
+Se han separado las llamadas WindowInsets de API 30+ en un método protegido por versión y se han marcado los atributos modernos del manifiesto. Lint sigue activo (`abortOnError true`); no se ha desactivado la comprobación global.
